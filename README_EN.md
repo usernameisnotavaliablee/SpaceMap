@@ -18,8 +18,11 @@ Screenshot:
 ![Running on Windows 11 scanning %AppData%](./demo.png)
 
 GIF demo + usage:
+
 <details>
+
 ![Running on Windows 11 scanning C:\Windows](./demo.gif)
+
 </details>
 
 ```bat

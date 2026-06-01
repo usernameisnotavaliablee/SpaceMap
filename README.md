@@ -18,8 +18,11 @@
 ![Windows11在%Appdata%运行测试](./demo.png)
 
 GIF实机演示+食用方法：
-<details>
+
+<details><summary>点击展开</summary>
+
 ![Windows11在C:\Windows运行测试](./demo.gif)
+
 </details>
 
 ## 快速开始
@@ -105,7 +108,7 @@ map.exe -i D:\
 
 ### JSON 输出
 
-<details>
+<details><summary>点击展开</summary>
 ```bat
 map.exe -j -o report.json D:\
 ```
