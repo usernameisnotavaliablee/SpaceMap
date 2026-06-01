@@ -61,7 +61,7 @@ build.bat
 ## 用法
 
 ```
-map.exe [选项] [路径]
+map [选项] [路径]
 ```
 
 |选项|说明|
@@ -77,24 +77,19 @@ map.exe [选项] [路径]
 |`--no-color`|禁用颜色|
 |`-h`|显示帮助|
 
-### 交互模式
+### TUI交互模式
 
 ```bat
-map.exe -i D:\
+map -i D:\
 ```
+或者在当前目录下
+```bat
+map -i
+```
+得到
+![TUI交互模式截图](./TUI.png)
 
-```
- D:\
-────────────────────────────────────────────────────────────────
-  Name                    Size       Bar
-────────────────────────────────────────────────────────────────
-    Games                 128.5 GB   ██████████████████████████
-    Projects               45.2 GB   ████████████████           ← 选中
-    Documents              32.1 GB   ███████████
-────────────────────────────────────────────────────────────────
- \[Q]uit  \[Enter]Open  \[Back]Up  \[S]ort  \[A]ll  \[T]op Files
-────────────────────────────────────────────────────────────────
-```
+
 
 |按键|功能|
 |-|-|
@@ -106,37 +101,13 @@ map.exe -i D:\
 |`T`|查看当前目录最大文件（异步加载，不阻塞界面）|
 |`Q`|退出|
 
-### JSON 输出
 
-<details><summary>点击展开</summary>
-```bat
-map.exe -j -o report.json D:\
-```
+## 跳过的目录
 
-```json
-{
-  "path": "D:\",
-  "scan_time_seconds": 3.2,
-  "total": { "size": 275234832384, "size_human": "256.3 GB", "files": 189432 },
-  "folders": [
-    { "name": "Games", "size": 138000000000, "size_human": "128.5 GB", "percent": 50.1 }
-  ],
-  "file_types": [
-    { "category": "Code", "size": 45412345678, "size_human": "42.3 GB", "count": 89234 }
-  ]
-}
-```
-</details>
+默认跳过：`$RECYCLE.BIN`、`System Volume Information`、`$WinREAgent`、`Recovery`、`PerfLogs`、所有 `.` 开头的隐藏目录。
 
-显示 Top 10 最大文件：
-```bat
-map.exe -t 10 D:\
-```
+用 `-v` 参数可查看具体跳过了哪些目录。
 
-显示所有目录（包括被折叠的，读缓存）：
-```bat
-map.exe -a D:\
-```
 
 ## 性能
 
@@ -164,6 +135,40 @@ NTFS 卷根目录自动走 MFT 快速路径（`FSCTL_ENUM_USN_DATA` + bulk read�
 - **Ctrl+C 友好** — 任意时刻Ctrl+C即可随时中断
 - **零依赖** — 单文件 exe，开箱即用
 
+
+### JSON 输出
+
+<details><summary>点击展开</summary>
+```bat
+map.exe -j -o report.json D:\
+```
+
+```json
+{
+  "path": "D:\",
+  "scan_time_seconds": 3.2,
+  "total": { "size": 275234832384, "size_human": "256.3 GB", "files": 189432 },
+  "folders": [
+    { "name": "Games", "size": 138000000000, "size_human": "128.5 GB", "percent": 50.1 }
+  ],
+  "file_types": [
+    { "category": "Code", "size": 45412345678, "size_human": "42.3 GB", "count": 89234 }
+  ]
+}
+```
+</details>
+
+使用`-t N` 显示最大的N个文件
+比如：
+```bat
+map -t 10 D:\
+```
+
+显示所有目录（包括被折叠的，读缓存）：
+```bat
+map -a D:\
+```
+
 ## 项目结构
 
 ```
@@ -177,7 +182,7 @@ spacemap/
 ├── map.cpp           主程序
 ├── build.bat         编译脚本
 ├── CMakeLists.txt    CMake 构建
-└──map.exe            编译成果 单文件直接运行
+└── map.exe           编译成果 单文件直接运行
 ```
 
 ### 模块依赖
@@ -529,12 +534,6 @@ while (parent >= 0) {
 - **逐行差分刷新**：VT 渲染路径维护 `prev_lines` 缓冲，仅重绘变化的行，减少终端 I/O。
 
 </details>
-
-## 跳过的目录
-
-默认跳过：`$RECYCLE.BIN`、`System Volume Information`、`$WinREAgent`、`Recovery`、`PerfLogs`、所有 `.` 开头的隐藏目录。
-
-用 `-v` 参数可查看具体跳过了哪些目录。
 
 ## 兼容性
 
