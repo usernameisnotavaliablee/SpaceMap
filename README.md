@@ -19,7 +19,7 @@
 
 GIF实机演示+食用方法：
 
-<details><summary>点击展开</summary>
+<details><summary>点击展开 大小42MB 可能需要等待</summary>
 
 ![Windows11在C:\Windows运行测试](./demo.gif)
 
