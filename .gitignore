@@ -1,5 +1,4 @@
 # Build output
-*.exe
 *.o
 *.obj
 

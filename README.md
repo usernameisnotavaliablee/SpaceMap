@@ -13,42 +13,18 @@
 
 **SpaceMap** — 一个轻量、快速、好看的命令行磁盘分析工具。
 
+实机演示：
 ![Windows11在C:\Windows运行测试](./demo.gif)
 
-```bat
-map.exe D:\
-```
+运行截图：
+![Windows11在%Appdata%运行测试](./demo.png)
 
-```
-  D:\
-  12 folders  |  total 256.3 GB  |  files 189432  |  dirs 23891
-
-  ──────────────────────────────────────────────────────────────
-  Folder                      Size  Bar
-  Games                    128.5 GB  ████████████████████████████████████████   50.1%
-  Projects                  45.2 GB  ████████████████                          17.6%
-  Documents                 32.1 GB  ███████████                               12.5%
-  Videos                    28.8 GB  ██████████                                11.2%
-  3 folders hidden (2.1 MB)
-
-  ──────────────────────────────────────────────────────────────
-  File Types
-  Other                    156.2 GB  ████████████████████████████████████████   60.9%
-  Code                      42.3 GB  ███████████                               16.5%
-  Document                  35.1 GB  █████████                                 13.7%
-
-  ──────────────────────────────────────────────────────────────
-  Done in 3.2s
-
-  -h help  -i interactive  -t N top files  -a show all folders
-```
 
 ## 快速开始
 
 ```bat
 map              # 扫描当前目录
-map D:\          # 扫描指定路径
-map -i           # 进入交互模式（像 ncdu 一样浏览）
+map -i           # 进入TUI交互模式（像 ncdu 一样浏览）
 ```
 
 ## 安装
@@ -60,7 +36,7 @@ map -i           # 进入交互模式（像 ncdu 一样浏览）
 或选择 **自行编译**（需要 g++ 4.9+ / MinGW-w64 / Windows 10+）：
 
 ```bat
-git clone https://github.com/usernameisnotavaliablee/spacemap.git  # ← 替换为你的 GitHub 用户名
+git clone https://github.com/usernameisnotavaliablee/spacemap.git
 cd spacemap
 build.bat
 ```

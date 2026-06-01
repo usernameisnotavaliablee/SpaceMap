@@ -47,7 +47,6 @@ map.exe D:\
 
 ```bat
 map              # Scan current directory
-map D:\          # Scan a specific path
 map -i           # Interactive mode (browse like ncdu)
 ```
 
@@ -125,7 +124,7 @@ map.exe -i D:\
 |`Q`|Quit|
 
 ### JSON Output
-
+<details>
 ```bat
 map.exe -j -o report.json D:\
 ```
@@ -143,6 +142,7 @@ map.exe -j -o report.json D:\
   ]
 }
 ```
+</details>
 
 Show Top 10 largest files:
 ```bat
