@@ -13,7 +13,14 @@ Explorer only shows one folder at a time, WinDirStat is bloated and slow to star
 
 **SpaceMap** — a lightweight, fast, and good-looking command-line disk analyzer for Windows.
 
+Screenshot:
+
+![Running on Windows 11 scanning %AppData%](./demo.png)
+
+GIF demo + usage:
+<details>
 ![Running on Windows 11 scanning C:\Windows](./demo.gif)
+</details>
 
 ```bat
 map.exe D:\
@@ -83,7 +90,8 @@ map.exe [options] [path]
 ```
 
 |Option|Description|
-|-|`-i`|Interactive mode, navigate with arrow keys|
+|-|-|
+|`-i`|Interactive mode, navigate with arrow keys|
 |`-t N`|Show Top N largest files (hidden by default)|
 |`-a`|Show all directories (uses cache, valid for 3 minutes)|
 |`-j`|JSON output|

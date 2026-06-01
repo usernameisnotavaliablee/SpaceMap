@@ -13,12 +13,14 @@
 
 **SpaceMap** — 一个轻量、快速、好看的命令行磁盘分析工具。
 
-实机演示：
-![Windows11在C:\Windows运行测试](./demo.gif)
-
 运行截图：
+
 ![Windows11在%Appdata%运行测试](./demo.png)
 
+GIF实机演示+食用方法：
+<details>
+![Windows11在C:\Windows运行测试](./demo.gif)
+</details>
 
 ## 快速开始
 
@@ -103,6 +105,7 @@ map.exe -i D:\
 
 ### JSON 输出
 
+<details>
 ```bat
 map.exe -j -o report.json D:\
 ```
@@ -120,6 +123,7 @@ map.exe -j -o report.json D:\
   ]
 }
 ```
+</details>
 
 显示 Top 10 最大文件：
 ```bat
