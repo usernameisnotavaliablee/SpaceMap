@@ -163,6 +163,7 @@ NTFS volume root directories automatically use the MFT fast path (`FSCTL_ENUM_US
 - **Interactive mode** — Browse directories like ncdu, press T to async-load largest files
 - **Scan tips** — While scanning, rotating tips appear next to the progress bar: usage flags, disk trivia, and dad jokes
 - **Command hints** — Shows useful commands after scan completion
+- **Double-click friendly** — Running map.exe directly waits for a keypress; press i to enter interactive mode
 - **Thread-safe** — Atomic operations protect concurrent reads/writes, no data races
 - **Graceful exit** — Timeout mechanisms prevent hangs on slow drives
 - **Ctrl+C friendly** — Interrupt anytime
@@ -551,7 +552,7 @@ Use `-v` to see which directories were skipped.
 | Windows Terminal | ✓ | Full color + Unicode |
 | PowerShell 7+ | ✓ | Full color + Unicode |
 | cmd.exe (Win10 1511+) | ✓ | Full color + Unicode |
-| cmd.exe (older Win10) | ✗ | Plain text, `#` bars |
+| cmd.exe (older Win10) | ✗ | Plain text, █ bars |
 | VS Code Terminal | ✓ | Full color + Unicode |
 
 ### Compiler Compatibility
