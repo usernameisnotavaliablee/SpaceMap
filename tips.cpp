@@ -18,6 +18,7 @@ static const char* TIPS[] = {
     "tip:扫描 NTFS 卷根目录(如 map C:\\)会自动走 MFT 直读,快到飞起 ",
     "tip:TUI 里按 T 看大文件,按 S 切换排序,按 Q 或 ESC 退出 ",
     "tip:TUI 里按退格返回上级目录,能一路退到盘符根 ",
+    "tip:直接双击 map.exe 扫描完会等你,按 i 就能进交互模式 ",
     "tip:--no-color 关闭颜色,方便把输出重定向到文件或日志 ",
     "tip:0B 目录默认隐藏；当大部分子目录都很大时,小目录会自动折叠 ",
     "tip:.开头的目录(.git/.cache)在 Windows 上是普通目录,会被正常统计 ",
