@@ -15,3 +15,8 @@
 Thumbs.db
 Desktop.ini
 spacemap-codex/
+
+# Linux port & docs
+linux ver/
+Claude code交接文档.md
+WSL测试指南.md

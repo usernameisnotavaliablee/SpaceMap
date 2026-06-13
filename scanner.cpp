@@ -1,4 +1,5 @@
 #include "scanner.h"
+#include "tips.h"
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -21,16 +22,15 @@ bool is_dot_dir(const wchar_t* name) {
 }
 
 bool should_skip(const wchar_t* name) {
-    // Fast path: check first char
-    if (name[0] == L'.') return true;
+    // 点开头目录（.cache/.git/.gradle ...）在 Windows 上是普通目录，需正常扫描。
+    // "." 与 ".." 已在每个调用点由 is_dot_dir() 过滤，此处无需再判断。
     if (name[0] == L'$') {
-        // Common system dirs starting with $
         return wcscmp(name, L"$RECYCLE.BIN") == 0 ||
-               wcscmp(name, L"System Volume Information") == 0 ||
                wcscmp(name, L"$WinREAgent") == 0;
     }
-    // Check other skip dirs
-    return wcscmp(name, L"Recovery") == 0 || wcscmp(name, L"PerfLogs") == 0;
+    return wcscmp(name, L"System Volume Information") == 0 ||
+           wcscmp(name, L"Recovery") == 0 ||
+           wcscmp(name, L"PerfLogs") == 0;
 }
 
 std::wstring join_path(const std::wstring& base, const wchar_t* name) {
@@ -261,7 +261,66 @@ ScanResult get_dir_size(const std::wstring& root, int top_n) {
     return result;
 }
 
-void update_progress(ProgressState& prog, std::ostream& out, bool ansi) {
+// 估算一个 Unicode 码点的终端显示宽度（CJK/全角/emoji 记 2 列，其余记 1 列）
+static int cp_width(unsigned int cp) {
+    if (cp == 0) return 0;
+    if ((cp >= 0x1100 && cp <= 0x115F) ||   // Hangul Jamo
+        (cp >= 0x2E80 && cp <= 0x303E) ||   // CJK 部首、标点
+        (cp >= 0x3041 && cp <= 0x33FF) ||   // 假名、CJK 符号
+        (cp >= 0x3400 && cp <= 0x4DBF) ||   // CJK 扩展 A
+        (cp >= 0x4E00 && cp <= 0x9FFF) ||   // CJK 统一表意
+        (cp >= 0xA000 && cp <= 0xA4CF) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) ||   // Hangul 音节
+        (cp >= 0xF900 && cp <= 0xFAFF) ||   // CJK 兼容
+        (cp >= 0xFF00 && cp <= 0xFF60) ||   // 全角 ASCII
+        (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+        (cp >= 0x1F300 && cp <= 0x1FAFF) || // emoji
+        (cp >= 0x20000 && cp <= 0x3FFFD)) { // CJK 扩展 B+
+        return 2;
+    }
+    return 1;
+}
+
+// 把 UTF-8 字符串按显示宽度截断到 max_cols 列，超出则以 … 结尾
+static std::string truncate_to_width(const std::string& s, int max_cols) {
+    if (max_cols <= 0) return std::string();
+    std::string out;
+    int cols = 0;
+    size_t i = 0, n = s.size();
+    while (i < n) {
+        unsigned char c = (unsigned char)s[i];
+        int len; unsigned int cp;
+        if (c < 0x80)      { len = 1; cp = c; }
+        else if (c < 0xE0) { len = 2; cp = c & 0x1F; }
+        else if (c < 0xF0) { len = 3; cp = c & 0x0F; }
+        else               { len = 4; cp = c & 0x07; }
+        if (i + (size_t)len > n) break;
+        for (int k = 1; k < len; k++) cp = (cp << 6) | ((unsigned char)s[i + k] & 0x3F);
+        int w = cp_width(cp);
+        if (cols + w > max_cols) {
+            out += "\xe2\x80\xa6"; // …
+            break;
+        }
+        out.append(s, i, len);
+        cols += w;
+        i += (size_t)len;
+    }
+    return out;
+}
+
+// 查询当前控制台宽度（失败时返回 80）
+static int console_width() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (hOut != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(hOut, &info)) {
+        int w = info.srWindow.Right - info.srWindow.Left + 1;
+        if (w > 0) return w;
+    }
+    return 80;
+}
+
+void update_progress(ProgressState& prog, std::ostream& out, bool ansi,
+                     int tip_start, long long elapsed_ms) {
     int done = prog.done_count.load();
     long long bytes = prog.bytes_so_far.load();
     int total = prog.total;
@@ -277,11 +336,48 @@ void update_progress(ProgressState& prog, std::ostream& out, bool ansi) {
         for (int i = filled; i < bar_w; i++) line << "\xe2\x96\x91";
         line << "]\x1b[0m " << done << "/" << total
              << "  \x1b[1m" << fmt_size(bytes) << "\x1b[0m";
+
+        // 进度条下方滚动显示小贴士（仅 ANSI 模式，需要光标移动）
+        if (tip_start >= 0) {
+            const char* tip = tip_for_elapsed(tip_start, elapsed_ms, 2500);
+            int max_cols = console_width() - 4;
+            std::string shown = truncate_to_width(tip, max_cols);
+            // 换行写贴士行，清掉残留，再把光标移回进度条行行首
+            line << "\n\x1b[2K  \x1b[2m" << shown << "\x1b[0m\x1b[1A\r";
+        }
     } else {
         line << "\r  [";
-        for (int i = 0; i < filled; i++) line << '#';
-        for (int i = filled; i < bar_w; i++) line << '.';
+        // 无 ANSI 时仍用 █/░ 块字符（控制台已设 UTF-8 代码页），不退化成 #/.
+        for (int i = 0; i < filled; i++) line << "\xe2\x96\x88";
+        for (int i = filled; i < bar_w; i++) line << "\xe2\x96\x91";
         line << "] " << done << "/" << total << "  " << fmt_size(bytes);
     }
+    out << line.str() << std::flush;
+}
+
+void update_indeterminate(std::ostream& out, const std::string& label,
+                          int tip_start, long long elapsed_ms) {
+    const int bar_w = 30;
+    // 一段宽度为 6 的亮块在 30 格内来回流动
+    const int block = 6;
+    int span = bar_w - block;            // 0..span
+    long long step = elapsed_ms / 120;   // 每 120ms 移一格
+    int period = span * 2;
+    int phase = period > 0 ? (int)(step % period) : 0;
+    int pos = phase <= span ? phase : period - phase;  // 三角波，来回弹
+
+    std::ostringstream line;
+    line << "\x1b[2K\r  \x1b[1m" << label << "\x1b[0m \x1b[36m[";
+    for (int i = 0; i < bar_w; i++) {
+        if (i >= pos && i < pos + block) line << "\xe2\x96\x88"; // █
+        else line << "\xe2\x96\x91";                             // ░
+    }
+    line << "]\x1b[0m";
+
+    const char* tip = tip_for_elapsed(tip_start, elapsed_ms, 2500);
+    int max_cols = console_width() - 4;
+    std::string shown = truncate_to_width(tip, max_cols);
+    line << "\n\x1b[2K  \x1b[2m" << shown << "\x1b[0m\x1b[1A\r";
+
     out << line.str() << std::flush;
 }

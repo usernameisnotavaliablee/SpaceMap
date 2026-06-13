@@ -67,7 +67,8 @@ std::string render_bar(double fraction, int width, bool ansi, long long size_byt
         result += "\x1b[0m";
         for (int i = filled; i < width; i++) result += ' ';
     } else {
-        for (int i = 0; i < filled; i++) result += '#';
+        // 无 ANSI 颜色时仍用 █ 实心块（控制台已设 UTF-8 代码页），不退化成 #
+        for (int i = 0; i < filled; i++) result += "\xe2\x96\x88";
         for (int i = filled; i < width; i++) result += ' ';
     }
     return result;
@@ -112,7 +113,6 @@ void print_help(std::ostream& out) {
         << "    -w, --workers N      Worker thread count (default: auto)\n"
         << "    -t, --top N          Show top N largest files (default: 0, disabled)\n"
         << "    -s, --sort MODE      Sort by: size, name (default: size)\n"
-        << "    -j, --json           Output in JSON format\n"
         << "    -o, --output FILE    Write results to file\n"
         << "    -i, --interactive    Enter interactive TUI mode\n"
         << "    -a, --all            Show all folders (cached, 3min TTL)\n"
@@ -395,75 +395,4 @@ void print_text_report(
         out << "  Done in " << fmt_time(elapsed) << "\n\n";
         out << "  -h help  -i interactive  -t N top files  -a show all folders\n\n";
     }
-}
-
-void print_json_report(
-    std::ostream& out,
-    const std::wstring& target,
-    const std::vector<DirEntry>& folders,
-    long long total_size,
-    unsigned long long total_files,
-    unsigned long long total_dirs,
-    unsigned long long total_skipped,
-    unsigned long long total_errors,
-    const std::vector<FileTypeStats>& file_types,
-    const std::vector<FileInfo>& top_files,
-    double elapsed) {
-
-    out << "{\n";
-    out << "  \"path\": \"" << escape_json(ws2s(target)) << "\",\n";
-    out << "  \"scan_time_seconds\": " << std::fixed << std::setprecision(1) << elapsed << ",\n";
-
-    // Total
-    out << "  \"total\": {\n";
-    out << "    \"size\": " << total_size << ",\n";
-    out << "    \"size_human\": \"" << fmt_size(total_size) << "\",\n";
-    out << "    \"files\": " << total_files << ",\n";
-    out << "    \"dirs\": " << total_dirs << ",\n";
-    out << "    \"skipped\": " << total_skipped << ",\n";
-    out << "    \"errors\": " << total_errors << "\n";
-    out << "  },\n";
-
-    // Folders
-    out << "  \"folders\": [\n";
-    for (size_t i = 0; i < folders.size(); i++) {
-        long long fsize = folders[i].size.load(std::memory_order_relaxed);
-        double pct = total_size > 0 ? (double)fsize / total_size * 100.0 : 0.0;
-        out << "    {\"name\": \"" << escape_json(ws2s(folders[i].name))
-            << "\", \"size\": " << fsize
-            << ", \"size_human\": \"" << fmt_size(fsize)
-            << "\", \"files\": " << folders[i].files.load(std::memory_order_relaxed)
-            << ", \"percent\": " << std::fixed << std::setprecision(1) << pct << "}";
-        if (i + 1 < folders.size()) out << ",";
-        out << "\n";
-    }
-    out << "  ],\n";
-
-    // File types
-    out << "  \"file_types\": [\n";
-    for (size_t i = 0; i < file_types.size(); i++) {
-        double pct = total_size > 0 ? (double)file_types[i].total_size / total_size * 100.0 : 0.0;
-        out << "    {\"category\": \"" << escape_json(file_types[i].category)
-            << "\", \"size\": " << file_types[i].total_size
-            << ", \"size_human\": \"" << fmt_size(file_types[i].total_size)
-            << "\", \"count\": " << file_types[i].count
-            << ", \"percent\": " << std::fixed << std::setprecision(1) << pct << "}";
-        if (i + 1 < file_types.size()) out << ",";
-        out << "\n";
-    }
-    out << "  ],\n";
-
-    // Top files
-    out << "  \"top_files\": [\n";
-    for (size_t i = 0; i < top_files.size(); i++) {
-        std::string fpath = ws2s(top_files[i].path);
-        if (fpath.find("\\\\?\\") == 0) fpath = fpath.substr(4);
-        out << "    {\"path\": \"" << escape_json(fpath)
-            << "\", \"size\": " << top_files[i].size
-            << ", \"size_human\": \"" << fmt_size(top_files[i].size) << "\"}";
-        if (i + 1 < top_files.size()) out << ",";
-        out << "\n";
-    }
-    out << "  ]\n";
-    out << "}\n";
 }

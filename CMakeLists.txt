@@ -11,10 +11,12 @@ add_executable(map
     output.cpp
     tui.cpp
     mft.cpp
+    tips.cpp
 )
 
 target_link_libraries(map PRIVATE kernel32)
 target_compile_definitions(map PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(map PRIVATE -finput-charset=UTF-8)
 
 if(MINGW)
     target_link_options(map PRIVATE -municode -static)

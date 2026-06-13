@@ -11,7 +11,6 @@ struct CliOptions {
     int workers;
     int top_n;
     std::string sort_mode;
-    bool json_output;
     bool interactive;
     bool no_color;
     bool verbose;
@@ -22,7 +21,7 @@ struct CliOptions {
 
     CliOptions()
         : workers(0), top_n(0), sort_mode("size"),
-          json_output(false), interactive(false), no_color(false), verbose(false), show_all(false), ansi_available(false) {}
+          interactive(false), no_color(false), verbose(false), show_all(false), ansi_available(false) {}
 };
 
 struct ScanStats {

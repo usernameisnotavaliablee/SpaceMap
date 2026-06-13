@@ -19,7 +19,7 @@ Screenshot:
 
 GIF demo + usage:
 
-<details>
+<details><summary>Click to expand (42 MB, may take a moment)</summary>
 
 ![Running on Windows 11 scanning C:\Windows](./demo.gif)
 
@@ -81,7 +81,6 @@ build.bat
 |Startup|Instant|Slow (scans first)|Instant|
 |Colors/Charts|Gradient + █ bars|Yes, but GUI|None|
 |Interactive|Yes (TUI)|Yes (GUI)|None|
-|JSON output|Yes|No|No|
 |CLI-native|Yes|Needs GUI|Yes|
 |Dependencies|None (single exe)|Requires install|Requires install|
 |Performance|Multi-threaded + MFT direct read, 2-5s/NTFS|Slow|Single-threaded|
@@ -97,7 +96,6 @@ map.exe [options] [path]
 |`-i`|Interactive mode, navigate with arrow keys|
 |`-t N`|Show Top N largest files (hidden by default)|
 |`-a`|Show all directories (uses cache, valid for 3 minutes)|
-|`-j`|JSON output|
 |`-o FILE`|Write output to file|
 |`-s name`|Sort by name (default: sort by size)|
 |`-v`|Show skipped/errored directory details|
@@ -134,27 +132,6 @@ map.exe -i D:\
 |`T`|View largest files in current directory (async, non-blocking)|
 |`Q`|Quit|
 
-### JSON Output
-<details>
-```bat
-map.exe -j -o report.json D:\
-```
-
-```json
-{
-  "path": "D:\\",
-  "scan_time_seconds": 3.2,
-  "total": { "size": 275234832384, "size_human": "256.3 GB", "files": 189432 },
-  "folders": [
-    { "name": "Games", "size": 138000000000, "size_human": "128.5 GB", "percent": 50.1 }
-  ],
-  "file_types": [
-    { "category": "Code", "size": 45412345678, "size_human": "42.3 GB", "count": 89234 }
-  ]
-}
-```
-</details>
-
 Show Top 10 largest files:
 ```bat
 map.exe -t 10 D:\
@@ -184,7 +161,7 @@ NTFS volume root directories automatically use the MFT fast path (`FSCTL_ENUM_US
 - **Adaptive width** — Progress bars and separators auto-fit terminal width
 - **CJK support** — Chinese/Japanese/Korean filenames truncate correctly without breaking layout
 - **Interactive mode** — Browse directories like ncdu, press T to async-load largest files
-- **JSON export** — Script-friendly output with UTF-8 BOM, opens directly in Notepad
+- **Scan tips** — While scanning, rotating tips appear next to the progress bar: usage flags, disk trivia, and dad jokes
 - **Command hints** — Shows useful commands after scan completion
 - **Thread-safe** — Atomic operations protect concurrent reads/writes, no data races
 - **Graceful exit** — Timeout mechanisms prevent hangs on slow drives
@@ -201,6 +178,7 @@ spacemap/
 ├── stats.h/cpp       File type classification
 ├── output.h/cpp      Output rendering
 ├── tui.h/cpp         Interactive mode
+├── tips.h/cpp        Scan-wait tips (usage / trivia / jokes)
 ├── map.cpp           Main entry point
 ├── build.bat         Build script
 ├── CMakeLists.txt    CMake build
@@ -258,7 +236,6 @@ struct CliOptions {
     int workers;             // Thread count
     int top_n;               // Top N file count
     std::string sort_mode;   // Sort mode
-    bool json_output;        // JSON output
     bool interactive;        // Interactive mode
     bool verbose;            // Verbose output
     bool no_color;           // Disable colors
@@ -559,7 +536,9 @@ while (parent >= 0) {
 
 ## Skipped Directories
 
-Skipped by default: `$RECYCLE.BIN`, `System Volume Information`, `$WinREAgent`, `Recovery`, `PerfLogs`, and all `.`-prefixed hidden directories.
+Skipped by default: `$RECYCLE.BIN`, `System Volume Information`, `$WinREAgent`, `Recovery`, `PerfLogs`, and reparse points (symlinks/junctions).
+
+Note: `.`-prefixed folders (e.g. `.cache`, `.git`, `.gradle`) are normal directories on Windows and are scanned and counted normally.
 
 Use `-v` to see which directories were skipped.
 

@@ -36,7 +36,14 @@ struct ProgressState {
     ProgressState() : done_count(0), bytes_so_far(0), total(0) {}
 };
 
-void update_progress(ProgressState& prog, std::ostream& out, bool ansi);
+// 渲染进度条。tip_start>=0 且 ansi 为真时，在进度条下方显示一条随时间轮换的小贴士。
+void update_progress(ProgressState& prog, std::ostream& out, bool ansi,
+                     int tip_start = -1, long long elapsed_ms = 0);
+
+// 不确定进度（如 MFT 扫描）时，渲染一行流动的扫描动画 + 下方滚动贴士（仅 ANSI）。
+// label 为动画前缀文字（如 "[MFT] Scanning"）。
+void update_indeterminate(std::ostream& out, const std::string& label,
+                          int tip_start, long long elapsed_ms);
 
 // Persistent cache helpers (shared between CLI and TUI)
 std::wstring get_cache_path();

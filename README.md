@@ -53,7 +53,6 @@ build.bat
 |启动速度|即时|慢（需扫描）|即时|
 |颜色/图表|渐变 + █ 柱状图|有，但 GUI|无|
 |交互模式|有（TUI）|有（GUI）|无|
-|JSON 输出|有|无|无|
 |命令行|原生|需要 GUI|原生|
 |依赖|无（单文件 exe）|需安装|需安装|
 |性能|多线程 + MFT 直读，2-5s/NTFS|慢|单线程|
@@ -69,7 +68,6 @@ map [选项] [路径]
 |`-i`|交互模式，方向键浏览目录|
 |`-t N`|显示 Top N 最大文件（默认不显示）|
 |`-a`|显示所有目录（读缓存，3分钟有效）|
-|`-j`|JSON 格式输出|
 |`-o FILE`|输出到文件|
 |`-s name`|按名称排序（默认按大小）|
 |`-v`|显示跳过/错误的目录详情|
@@ -104,7 +102,9 @@ map -i
 
 ## 跳过的目录
 
-默认跳过：`$RECYCLE.BIN`、`System Volume Information`、`$WinREAgent`、`Recovery`、`PerfLogs`、所有 `.` 开头的隐藏目录。
+默认跳过：`$RECYCLE.BIN`、`System Volume Information`、`$WinREAgent`、`Recovery`、`PerfLogs`，以及符号链接/重解析点（reparse point）。
+
+注意：`.` 开头的目录（如 `.cache`、`.git`、`.gradle`）在 Windows 上是普通目录，会被正常扫描和统计。
 
 用 `-v` 参数可查看具体跳过了哪些目录。
 
@@ -128,35 +128,14 @@ NTFS 卷根目录自动走 MFT 快速路径（`FSCTL_ENUM_USN_DATA` + bulk read�
 - **自适应宽度** — 进度条和分隔线自动适配终端宽度
 - **CJK 支持** — 中日韩文件名正确截断，不会撑乱表格
 - **交互模式** — 像 ncdu 一样浏览目录，按 T 异步加载当前目录最大文件
-- **JSON 导出** — 便于脚本处理，输出带 UTF-8 BOM，记事本可直接打开
+- **扫描小贴士** — 等待扫描时进度条旁滚动显示用法参数、磁盘冷知识、冷笑话
 - **命令提示** — 扫描完成后显示常用命令，方便快速上手
+- **双击友好** — 直接运行 map.exe 时自动等待，可按 i 进入交互模式
 - **线程安全** — 原子操作保护并发读写，无数据竞争
 - **优雅退出** — 超时机制防止卡死在慢速驱动器上
 - **Ctrl+C 友好** — 任意时刻Ctrl+C即可随时中断
 - **零依赖** — 单文件 exe，开箱即用
 
-
-### JSON 输出
-
-<details><summary>点击展开</summary>
-```bat
-map.exe -j -o report.json D:\
-```
-
-```json
-{
-  "path": "D:\",
-  "scan_time_seconds": 3.2,
-  "total": { "size": 275234832384, "size_human": "256.3 GB", "files": 189432 },
-  "folders": [
-    { "name": "Games", "size": 138000000000, "size_human": "128.5 GB", "percent": 50.1 }
-  ],
-  "file_types": [
-    { "category": "Code", "size": 45412345678, "size_human": "42.3 GB", "count": 89234 }
-  ]
-}
-```
-</details>
 
 使用`-t N` 显示最大的N个文件
 比如：
@@ -179,6 +158,7 @@ spacemap/
 ├── stats.h/cpp       文件类型分类
 ├── output.h/cpp      输出渲染
 ├── tui.h/cpp         交互模式
+├── tips.h/cpp        扫描等待小贴士（用法/冷知识/冷笑话）
 ├── map.cpp           主程序
 ├── build.bat         编译脚本
 ├── CMakeLists.txt    CMake 构建
@@ -236,7 +216,6 @@ struct CliOptions {
     int workers;             // 线程数
     int top_n;               // Top N 文件数
     std::string sort_mode;   // 排序方式
-    bool json_output;        // JSON 输出
     bool interactive;        // 交互模式
     bool verbose;            // 显示详细信息
     bool no_color;           // 禁用颜色
@@ -544,7 +523,7 @@ while (parent >= 0) {
 | Windows Terminal | ✓ | 完整颜色 + Unicode |
 | PowerShell 7+ | ✓ | 完整颜色 + Unicode |
 | cmd.exe (Win10 1511+) | ✓ | 完整颜色 + Unicode |
-| cmd.exe (旧版 Win10) | ✗ | 纯文本，`#` 号柱状图 |
+| cmd.exe (旧版 Win10) | ✗ | 纯文本，█ 柱状图 |
 | VS Code 终端 | ✓ | 完整颜色 + Unicode |
 
 ### 编译器兼容性

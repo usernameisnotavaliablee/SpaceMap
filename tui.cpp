@@ -3,10 +3,12 @@
 #include "output.h"
 #include "stats.h"
 #include "mft.h"
+#include "tips.h"
 #include <iostream>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <chrono>
 
 static HANDLE g_tui_buffer = INVALID_HANDLE_VALUE;
 static HANDLE g_orig_buffer = INVALID_HANDLE_VALUE;
@@ -17,6 +19,32 @@ static HANDLE g_input_handle = INVALID_HANDLE_VALUE;
 #endif
 
 static bool g_vt_supported = false;
+
+// UTF-8 -> wstring（用于把 tips.cpp 的 UTF-8 贴士显示到宽字符 TUI）
+static std::wstring tui_u8_to_w(const char* s) {
+    if (!s || !*s) return std::wstring();
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    if (n <= 0) return std::wstring();
+    std::wstring w(n - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s, -1, &w[0], n);
+    return w;
+}
+
+// 按显示宽度(CJK算2列)把宽字符串截断到 max_cols，超出以 … 结尾
+static std::wstring tui_truncate_w(const std::wstring& s, int max_cols) {
+    if (max_cols <= 0) return std::wstring();
+    std::wstring out;
+    int cols = 0;
+    for (wchar_t ch : s) {
+        int cw = (ch >= 0x4E00 && ch <= 0x9FFF) || (ch >= 0x3000 && ch <= 0x30FF) ||
+                 (ch >= 0xFF00 && ch <= 0xFFEF) || (ch >= 0xAC00 && ch <= 0xD7AF) ? 2 : 1;
+        if (cols + cw > max_cols) { out += L'…'; break; }
+        out += ch;
+        cols += cw;
+    }
+    return out;
+}
+
 
 static void tui_init() {
     g_orig_buffer = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -236,6 +264,10 @@ static void start_scan_all(TuiState& state) {
     // Background scan
     state.scanning.store(true);
     state.scan_active.store(true);
+    // 记录扫描开始时刻 + 选定贴士起始下标，供渲染时轮换显示
+    state.scan_start_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+    state.tip_start = tips_random_start();
     std::wstring snap_path;
     std::vector<std::wstring> snap_names;
     {
@@ -871,6 +903,18 @@ static void tui_render_vt(TuiState& state, int w, int h,
                 wchar_t pbuf[64];
                 swprintf(pbuf, 64, L"] %d%% (%d/%d)", pct, scanned_count, (int)entries_copy.size());
                 line += pbuf;
+
+                // \u8fdb\u5ea6\u540e\u9762\u63a5\u4e00\u6761\u968f\u65f6\u95f4\u8f6e\u6362\u7684\u5c0f\u8d34\u58eb\uff0c\u586b\u6ee1\u5230\u53f3\u8fb9\u6846
+                long long now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                long long el = now_ms - state.scan_start_ms.load();
+                if (el < 0) el = 0;
+                std::wstring tip = tui_u8_to_w(tip_for_elapsed(state.tip_start, el, 2500));
+                int used = cjk_w(L"Scanning [") + prog_w + cjk_w(pbuf);
+                int room = w - 4 - used - 3; // \u9884\u7559 " | " \u5206\u9694
+                if (room >= 8 && !tip.empty()) {
+                    line += rst + VT_FG_DIM + L"  " + tui_truncate_w(tip, room);
+                }
             } else {
                 wchar_t pbuf[32];
                 swprintf(pbuf, 32, L"%d%%", pct);

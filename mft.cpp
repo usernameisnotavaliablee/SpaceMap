@@ -176,7 +176,7 @@ struct MftFileEntry {
 // ② Check if MFT entry should be skipped (reparse points + system dirs)
 static bool mft_should_skip(const std::wstring& name, DWORD attr) {
     if (attr & FILE_ATTRIBUTE_REPARSE_POINT) return true;
-    if (!name.empty() && name[0] == L'.') return true;
+    // 点开头目录在 Windows 上是普通目录，不跳过。
     if (name == L"$RECYCLE.BIN" || name == L"System Volume Information" ||
         name == L"$WinREAgent" || name == L"Recovery" || name == L"PerfLogs") {
         return true;
@@ -365,7 +365,7 @@ bool get_dir_size_mft(const std::wstring& root, int top_n, MftScanResult& out) {
             if (g_interrupted.load()) break;
             if (it->second.is_dir) continue;
 
-            LONGLONG offset = (LONGLONG)it->first * mft_rec_size;
+            LONGLONG offset = mft_start_byte + (LONGLONG)it->first * mft_rec_size;
             DWORD bytes_read = 0;
             OVERLAPPED ov = {};
             ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
@@ -399,13 +399,6 @@ bool get_dir_size_mft(const std::wstring& root, int top_n, MftScanResult& out) {
     }
 
     int nd = (int)dir_refs.size();
-    std::vector<long long> dir_sizes(nd, 0);
-    // Fix ⑧: dir_files = recursive file count (all descendants)
-    std::vector<unsigned long long> dir_files(nd, 0);
-    // Fix ⑦: dir_subdirs = actual subdirectory count (not file count)
-    std::vector<unsigned long long> dir_subdirs(nd, 0);
-    std::vector<int> dir_parent(nd, -1);
-
     // Fix ⑨: Build adjacency list for O(n) BFS instead of O(n²)
     std::vector<std::vector<int>> children(nd);
     for (int i = 0; i < nd; i++) {
@@ -414,28 +407,7 @@ bool get_dir_size_mft(const std::wstring& root, int top_n, MftScanResult& out) {
         DWORDLONG parent = eit->second.parent_ref;
         std::unordered_map<DWORDLONG, int>::iterator pit = dir_idx.find(parent);
         if (pit != dir_idx.end() && pit->second != i) {
-            dir_parent[i] = pit->second;
             children[pit->second].push_back(i);
-        }
-    }
-
-    // Propagate: each file adds size to all ancestor directories
-    for (auto it = entries.begin(); it != entries.end(); ++it) {
-        if (it->second.is_dir || it->second.size <= 0) continue;
-
-        // ② Skip reparse points
-        if (it->second.file_attr & FILE_ATTRIBUTE_REPARSE_POINT) continue;
-
-        std::unordered_map<DWORDLONG, int>::iterator pit = dir_idx.find(it->second.parent_ref);
-        if (pit == dir_idx.end()) continue;
-        int parent = pit->second;
-
-        // Fix ⑧: dir_files counts recursively — add 1 to direct parent and all ancestors
-        int p = parent;
-        while (p >= 0 && p < nd) {
-            dir_files[p]++;       // ⑧ recursive file count
-            dir_sizes[p] += it->second.size;
-            p = dir_parent[p];
         }
     }
 
@@ -493,67 +465,12 @@ bool get_dir_size_mft(const std::wstring& root, int top_n, MftScanResult& out) {
 
     if (root_idx < 0) return false;
 
-    // Fix ⑦: Count actual subdirectories using children adjacency list
-    for (int i = 0; i < nd; i++) {
-        dir_subdirs[i] = children[i].size();
-    }
-    // BFS from root_idx, propagate in reverse BFS order (leaves first)
-    {
-        std::vector<int> bfs_order;
-        std::vector<int> q;
-        q.push_back(root_idx);
-        size_t qi = 0;
-        while (qi < q.size()) {
-            int cur = q[qi++];
-            bfs_order.push_back(cur);
-            for (size_t ci = 0; ci < children[cur].size(); ci++) {
-                q.push_back(children[cur][ci]);
-            }
-        }
-        for (int i = (int)bfs_order.size() - 1; i >= 0; i--) {
-            int idx = bfs_order[i];
-            if (dir_parent[idx] >= 0) {
-                dir_subdirs[dir_parent[idx]] += dir_subdirs[idx];
-            }
-        }
-    }
-
-    out.scan = ScanResult();
-    out.folders.clear();
-
-    // ② Collect immediate children, skipping reparse points and system dirs
-    long long sum_size = 0;
-    unsigned long long sum_files = 0;
-
-    for (size_t ci = 0; ci < children[root_idx].size(); ci++) {
-        int idx = children[root_idx][ci];
-        auto eit = find_entry(entries, dir_refs[idx]);
-        if (eit == entries.end()) continue;
-        const std::wstring& name = eit->second.name;
-
-        // ② Skip reparse points and system dirs
-        if (mft_should_skip(name, eit->second.file_attr)) continue;
-
-        DirEntry de;
-        de.name = name;
-        de.size.store(dir_sizes[idx], std::memory_order_relaxed);
-        de.files.store(dir_files[idx], std::memory_order_relaxed);
-        de.dirs.store(dir_subdirs[idx], std::memory_order_relaxed);
-        out.folders.push_back(de);
-
-        sum_files += dir_files[idx];
-        long long abs_size = dir_sizes[idx];
-        if (abs_size < 0) abs_size = -abs_size;
-        sum_size += abs_size;
-    }
-
-    out.scan.stats.dirs = out.folders.size() + 1;
-    out.scan.stats.files = sum_files;
-    out.scan.stats.size = sum_size;
-
-    // Fix ⑨: BFS using adjacency list (O(n) instead of O(n²))
-    std::vector<bool> under_root(nd, false);
-    under_root[root_idx] = true;
+    // Build the visible directory tree from root, pruning the same skip dirs
+    // as the regular scanner. top_child maps each visible directory to the
+    // immediate child under root that owns its totals; root itself is -1.
+    std::vector<bool> visible_dir(nd, false);
+    std::vector<int> top_child(nd, -1);
+    visible_dir[root_idx] = true;
     {
         std::vector<int> queue;
         queue.push_back(root_idx);
@@ -562,25 +479,68 @@ bool get_dir_size_mft(const std::wstring& root, int top_n, MftScanResult& out) {
             int cur = queue[qi++];
             for (size_t ci = 0; ci < children[cur].size(); ci++) {
                 int child = children[cur][ci];
-                if (!under_root[child]) {
-                    under_root[child] = true;
-                    queue.push_back(child);
-                }
+                auto eit = find_entry(entries, dir_refs[child]);
+                if (eit == entries.end()) continue;
+                if (mft_should_skip(eit->second.name, eit->second.file_attr)) continue;
+
+                visible_dir[child] = true;
+                top_child[child] = (cur == root_idx) ? child : top_child[cur];
+                queue.push_back(child);
             }
         }
     }
 
-    // Aggregate file extensions and find top files
+    out.scan = ScanResult();
+    out.folders.clear();
+
+    std::vector<unsigned long long> visible_dirs(nd, 0);
+    for (int i = 0; i < nd; i++) {
+        if (!visible_dir[i]) continue;
+        out.scan.stats.dirs++;
+        if (top_child[i] >= 0) visible_dirs[top_child[i]]++;
+    }
+
+    std::unordered_map<int, size_t> folder_slots;
+    for (size_t ci = 0; ci < children[root_idx].size(); ci++) {
+        int idx = children[root_idx][ci];
+        if (!visible_dir[idx]) continue;
+
+        auto eit = find_entry(entries, dir_refs[idx]);
+        if (eit == entries.end()) continue;
+
+        DirEntry de;
+        de.name = eit->second.name;
+        de.dirs.store(visible_dirs[idx], std::memory_order_relaxed);
+        out.folders.push_back(de);
+        folder_slots[idx] = out.folders.size() - 1;
+    }
+
+    // Aggregate totals, file extensions and top files from visible files only.
     std::unordered_map<std::string, long long> ext_sizes;
     std::unordered_map<std::string, unsigned long long> ext_counts;
 
     for (auto it = entries.begin(); it != entries.end(); ++it) {
-        if (it->second.is_dir || it->second.size <= 0) continue;
+        if (it->second.is_dir) continue;
         if (it->second.file_attr & FILE_ATTRIBUTE_REPARSE_POINT) continue;  // ②
 
         std::unordered_map<DWORDLONG, int>::iterator pit = dir_idx.find(it->second.parent_ref);
         if (pit == dir_idx.end()) continue;
-        if (!under_root[pit->second]) continue;
+        if (!visible_dir[pit->second]) continue;
+
+        out.scan.stats.files++;
+        out.scan.stats.size += it->second.size;
+
+        int child_idx = top_child[pit->second];
+        if (child_idx >= 0) {
+            std::unordered_map<int, size_t>::iterator slot = folder_slots.find(child_idx);
+            if (slot != folder_slots.end()) {
+                DirEntry& folder = out.folders[slot->second];
+                folder.size.store(folder.size.load(std::memory_order_relaxed) + it->second.size,
+                                  std::memory_order_relaxed);
+                folder.files.store(folder.files.load(std::memory_order_relaxed) + 1,
+                                   std::memory_order_relaxed);
+            }
+        }
 
         std::string ext = mft_get_ext(it->second.name.c_str());
         if (!ext.empty()) {

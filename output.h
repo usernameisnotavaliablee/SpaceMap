@@ -33,17 +33,4 @@ void print_text_report(
     const std::vector<std::wstring>& skipped_dirs,
     const std::vector<std::wstring>& error_dirs);
 
-void print_json_report(
-    std::ostream& out,
-    const std::wstring& target,
-    const std::vector<DirEntry>& folders,
-    long long total_size,
-    unsigned long long total_files,
-    unsigned long long total_dirs,
-    unsigned long long total_skipped,
-    unsigned long long total_errors,
-    const std::vector<FileTypeStats>& file_types,
-    const std::vector<FileInfo>& top_files,
-    double elapsed);
-
 #endif

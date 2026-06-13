@@ -15,6 +15,8 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
+#include <conio.h>
 
 #include "types.h"
 #include "scanner.h"
@@ -22,6 +24,145 @@
 #include "output.h"
 #include "tui.h"
 #include "mft.h"
+#include "tips.h"
+
+static std::string cache_unescape_json(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        char c = s[i];
+        if (c != '\\' || i + 1 >= s.size()) {
+            out += c;
+            continue;
+        }
+
+        char e = s[++i];
+        switch (e) {
+            case '\\': out += '\\'; break;
+            case '"': out += '"'; break;
+            case '/': out += '/'; break;
+            case 'n': out += '\n'; break;
+            case 'r': out += '\r'; break;
+            case 't': out += '\t'; break;
+            case 'u': {
+                if (i + 4 < s.size()) {
+                    std::string hex = s.substr(i + 1, 4);
+                    char* end = NULL;
+                    long cp = strtol(hex.c_str(), &end, 16);
+                    if (end && *end == '\0' && cp >= 0 && cp < 0x80) {
+                        out += (char)cp;
+                        i += 4;
+                        break;
+                    }
+                }
+                out += "\\u";
+                break;
+            }
+            default:
+                out += '\\';
+                out += e;
+                break;
+        }
+    }
+    return out;
+}
+
+static size_t cache_string_end(const std::string& content, size_t start) {
+    bool escaped = false;
+    for (size_t i = start; i < content.size(); i++) {
+        char c = content[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (c == '"') return i;
+    }
+    return std::string::npos;
+}
+
+static std::wstring utf8_to_wstring(const std::string& s) {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0);
+    if (wlen <= 0) return std::wstring();
+    std::vector<wchar_t> wbuf(wlen);
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, wbuf.data(), wlen);
+    return std::wstring(wbuf.data());
+}
+
+static std::string get_extension_fast(const wchar_t* name) {
+    const wchar_t* dot = NULL;
+    for (const wchar_t* p = name; *p; p++) {
+        if (*p == L'.') dot = p;
+    }
+    if (!dot || dot == name) return "";
+
+    bool all_ascii = true;
+    int len = 0;
+    for (const wchar_t* p = dot; *p; p++) {
+        if (*p > 127) { all_ascii = false; break; }
+        len++;
+    }
+
+    if (all_ascii && len < 16) {
+        char buf[16];
+        for (int i = 0; i < len; i++) {
+            char c = (char)dot[i];
+            buf[i] = (c >= 'A' && c <= 'Z') ? c + 32 : c;
+        }
+        buf[len] = 0;
+        return std::string(buf);
+    }
+
+    int wlen = (int)wcslen(dot);
+    char buf[32];
+    int n = WideCharToMultiByte(CP_UTF8, 0, dot, wlen, buf, sizeof(buf) - 1, NULL, NULL);
+    if (n <= 0) return "";
+    buf[n] = 0;
+    for (int i = 0; i < n; i++) {
+        if (buf[i] >= 'A' && buf[i] <= 'Z') buf[i] += 32;
+    }
+    return std::string(buf);
+}
+
+static void add_file_to_result(ScanResult& result, const std::wstring& dir,
+                               const wchar_t* name, long long fsize, int top_n) {
+    result.stats.files++;
+    result.stats.size += fsize;
+
+    std::string ext = get_extension_fast(name);
+    if (!ext.empty()) {
+        result.ext_sizes[ext] += fsize;
+        result.ext_counts[ext]++;
+    }
+
+    if (top_n <= 0) return;
+
+    if ((int)result.top_files.size() < top_n) {
+        FileInfo fi;
+        fi.path = join_path(dir, name);
+        fi.size = fsize;
+        fi.extension = ext;
+        result.top_files.push_back(fi);
+        if ((int)result.top_files.size() == top_n) {
+            std::sort(result.top_files.begin(), result.top_files.end(),
+                      [](const FileInfo& a, const FileInfo& b) { return a.size > b.size; });
+        }
+    } else if (fsize > result.top_files.back().size) {
+        result.top_files.back().path = join_path(dir, name);
+        result.top_files.back().size = fsize;
+        result.top_files.back().extension = ext;
+        for (int i = (int)result.top_files.size() - 1; i > 0; i--) {
+            if (result.top_files[i].size > result.top_files[i - 1].size) {
+                std::swap(result.top_files[i], result.top_files[i - 1]);
+            } else {
+                break;
+            }
+        }
+    }
+}
 
 // Cache management
 std::wstring get_cache_path() {
@@ -54,14 +195,14 @@ static void save_cache(const std::wstring& cache_path, const std::wstring& targe
     std::ofstream f(path_utf8.c_str());
     if (!f.is_open()) return;
     f << "{\n";
-    f << "  \"path\": \"" << ws2s(target) << "\",\n";
+    f << "  \"path\": \"" << escape_json(ws2s(target)) << "\",\n";
     f << "  \"scan_time_seconds\": " << elapsed << ",\n";
     f << "  \"total\": {\"size\": " << total_size << ", \"files\": " << total_files
       << ", \"dirs\": " << total_dirs << ", \"skipped\": " << total_skipped << ", \"errors\": " << total_errors << "},\n";
     f << "  \"folders\": [\n";
     for (size_t i = 0; i < folders.size(); i++) {
         long long sz = folders[i].size.load(std::memory_order_relaxed);
-        f << "    {\"name\": \"" << ws2s(folders[i].name) << "\", \"size\": " << sz
+        f << "    {\"name\": \"" << escape_json(ws2s(folders[i].name)) << "\", \"size\": " << sz
           << ", \"files\": " << folders[i].files.load(std::memory_order_relaxed)
           << ", \"dirs\": " << folders[i].dirs.load(std::memory_order_relaxed) << "}";
         if (i + 1 < folders.size()) f << ",";
@@ -78,7 +219,7 @@ static void save_cache(const std::wstring& cache_path, const std::wstring& targe
     f << "  ],\n";
     f << "  \"top_files\": [\n";
     for (size_t i = 0; i < top_files.size(); i++) {
-        f << "    {\"path\": \"" << ws2s(top_files[i].path) << "\", \"size\": " << top_files[i].size << "}";
+        f << "    {\"path\": \"" << escape_json(ws2s(top_files[i].path)) << "\", \"size\": " << top_files[i].size << "}";
         if (i + 1 < top_files.size()) f << ",";
         f << "\n";
     }
@@ -104,15 +245,9 @@ bool load_cache(const std::wstring& cache_path,
     size_t pos = content.find("\"path\": \"");
     if (pos == std::string::npos) return false;
     pos += 9;
-    size_t end = content.find("\"", pos);
+    size_t end = cache_string_end(content, pos);
     if (end == std::string::npos) return false;
-    std::string path_str = content.substr(pos, end - pos);
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, path_str.c_str(), -1, NULL, 0);
-    if (wlen > 0) {
-        std::vector<wchar_t> wbuf(wlen);
-        MultiByteToWideChar(CP_UTF8, 0, path_str.c_str(), -1, wbuf.data(), wlen);
-        cached_path = wbuf.data();
-    }
+    cached_path = utf8_to_wstring(cache_unescape_json(content.substr(pos, end - pos)));
 
     // Extract scan_time_seconds
     pos = content.find("\"scan_time_seconds\": ");
@@ -158,17 +293,11 @@ bool load_cache(const std::wstring& cache_path,
         size_t name_pos = content.find("\"name\": \"", pos);
         if (name_pos == std::string::npos || name_pos > content.find("]", pos)) break;
         name_pos += 9;
-        size_t name_end = content.find("\"", name_pos);
+        size_t name_end = cache_string_end(content, name_pos);
         if (name_end == std::string::npos) break;
 
         DirEntry entry;
-        std::string name_utf8 = content.substr(name_pos, name_end - name_pos);
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, name_utf8.c_str(), -1, NULL, 0);
-        if (wlen > 0) {
-            std::vector<wchar_t> wbuf(wlen);
-            MultiByteToWideChar(CP_UTF8, 0, name_utf8.c_str(), -1, wbuf.data(), wlen);
-            entry.name = wbuf.data();
-        }
+        entry.name = utf8_to_wstring(cache_unescape_json(content.substr(name_pos, name_end - name_pos)));
 
         size_t size_pos = content.find("\"size\": ", name_end);
         if (size_pos == std::string::npos) break;
@@ -225,17 +354,11 @@ bool load_cache(const std::wstring& cache_path,
         size_t path_pos = content.find("\"path\": \"", pos);
         if (path_pos == std::string::npos || path_pos > content.find("]", pos)) break;
         path_pos += 9;
-        size_t path_end = content.find("\"", path_pos);
+        size_t path_end = cache_string_end(content, path_pos);
         if (path_end == std::string::npos) break;
 
         FileInfo fi;
-        std::string fpath_utf8 = content.substr(path_pos, path_end - path_pos);
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, fpath_utf8.c_str(), -1, NULL, 0);
-        if (wlen > 0) {
-            std::vector<wchar_t> wbuf(wlen);
-            MultiByteToWideChar(CP_UTF8, 0, fpath_utf8.c_str(), -1, wbuf.data(), wlen);
-            fi.path = wbuf.data();
-        }
+        fi.path = utf8_to_wstring(cache_unescape_json(content.substr(path_pos, path_end - path_pos)));
 
         size_t size_pos = content.find("\"size\": ", path_end);
         if (size_pos == std::string::npos) break;
@@ -312,7 +435,8 @@ CliOptions parse_args(int argc, wchar_t* argv[]) {
         } else if (arg.find(L"--sort=") == 0) {
             opts.sort_mode = ws2s(arg.substr(7));
         } else if (arg == L"-j" || arg == L"--json") {
-            opts.json_output = true;
+            std::cerr << "error: JSON output has been removed" << std::endl;
+            exit(1);
         } else if (arg == L"-i" || arg == L"--interactive") {
             opts.interactive = true;
         } else if (arg == L"--no-color") {
@@ -342,13 +466,24 @@ CliOptions parse_args(int argc, wchar_t* argv[]) {
     return opts;
 }
 
+static void pause_if_double_clicked() {
+    DWORD pids[2];
+    if (GetConsoleProcessList(pids, 2) <= 1) {
+        std::cout << "\nPress any key to continue...";
+        _getch();
+    }
+}
+
 int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(65001);
     SetConsoleCP(65001);
 
-    std::cout << "Loading..." << std::flush;
-
     CliOptions opts = parse_args(argc, argv);
+    bool quiet_stdout = !opts.output_file.empty();
+    if (!quiet_stdout) {
+        std::cout << "Loading..." << std::flush;
+    }
+
     if (opts.sort_mode != "name" && opts.sort_mode != "size") {
         if (!opts.sort_mode.empty())
             std::cerr << "warning: unknown sort mode '" << opts.sort_mode << "', using 'size'" << std::endl;
@@ -361,8 +496,9 @@ int wmain(int argc, wchar_t* argv[]) {
 
     DWORD attrs = GetFileAttributesW(target_scan.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        std::cout << "\r" << std::string(12, ' ') << "\r";
+        if (!quiet_stdout) std::cout << "\r" << std::string(12, ' ') << "\r";
         std::cerr << "error: not a valid directory: " << ws2s(target_display) << std::endl;
+        pause_if_double_clicked();
         return 1;
     }
 
@@ -375,8 +511,9 @@ int wmain(int argc, wchar_t* argv[]) {
 
     // Interactive mode
     if (opts.interactive) {
-        std::cout << "\r" << std::string(12, ' ') << "\r";
+        if (!quiet_stdout) std::cout << "\r" << std::string(12, ' ') << "\r";
         tui_run(target_display, opts.top_n);
+        pause_if_double_clicked();
         return 0;
     }
 
@@ -413,17 +550,40 @@ int wmain(int argc, wchar_t* argv[]) {
     if (is_volume_root(target_scan)) {
         std::wstring drive = get_drive_root(target_scan);
         if (!drive.empty() && is_ntfs_volume(drive)) {
-            std::cout << "\r" << std::string(12, ' ') << "\r";
-            if (ansi) {
-                std::cout << "\n  \x1b[1m[MFT] Scanning volume\x1b[0m "
-                          << ws2s(target_display) << " ...\n" << std::endl;
-            } else {
+            if (!quiet_stdout) std::cout << "\r" << std::string(12, ' ') << "\r";
+            std::string mft_label = "[MFT] Scanning " + ws2s(target_display);
+            if (!quiet_stdout && !ansi) {
                 std::cout << "\n  [MFT] Scanning volume " << ws2s(target_display) << " ...\n" << std::endl;
             }
 
             auto t_start = std::chrono::steady_clock::now();
             MftScanResult mft_out;
-            if (get_dir_size_mft(target_scan, opts.top_n, mft_out)) {
+            // MFT 扫描没有增量进度，放到后台线程跑，主线程播放流动动画 + 滚动贴士
+            std::atomic<bool> mft_done(false);
+            std::atomic<bool> mft_ok(false);
+            std::thread mft_thread([&]() {
+                bool ok = get_dir_size_mft(target_scan, opts.top_n, mft_out);
+                mft_ok.store(ok);
+                mft_done.store(true);
+            });
+
+            if (ansi && !quiet_stdout) {
+                std::cout << "\n";  // 给动画行 + 贴士行留位置
+                int tip_start = tips_random_start();
+                while (!mft_done.load() && !g_interrupted.load()) {
+                    long long el = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t_start).count();
+                    update_indeterminate(std::cout, mft_label, tip_start, el);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+                }
+            }
+            mft_thread.join();
+            if (ansi && !quiet_stdout) {
+                // 清掉动画行 + 贴士行
+                std::cout << "\x1b[2K\r\n\x1b[2K\r\x1b[1A" << std::flush;
+            }
+
+            if (mft_ok.load()) {
                 auto t_end = std::chrono::steady_clock::now();
                 elapsed = std::chrono::duration<double>(t_end - t_start).count();
                 mft_used = true;
@@ -449,19 +609,28 @@ int wmain(int argc, wchar_t* argv[]) {
     // Regular scan path
     std::vector<std::wstring> dir_names;
     std::vector<std::wstring> dir_paths;
+    ScanResult root_files;
+    root_files.stats.dirs = 1;
+    auto t_start = std::chrono::steady_clock::now();
 
     WIN32_FIND_DATAW fd;
     HANDLE h = find_first_fast(search_pattern(target_scan), &fd);
     if (h != INVALID_HANDLE_VALUE) {
         do {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
             if (is_dot_dir(fd.cFileName)) continue;
-            if (should_skip(fd.cFileName) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-                total_skipped++;
-                continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                if (should_skip(fd.cFileName) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+                    total_skipped++;
+                    if (all_skipped_dirs.size() < ScanResult::MAX_LOGGED_DIRS)
+                        all_skipped_dirs.push_back(join_path(target_scan, fd.cFileName));
+                    continue;
+                }
+                dir_names.push_back(fd.cFileName);
+                dir_paths.push_back(join_path(target_scan, fd.cFileName));
+            } else {
+                long long fsize = ((long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+                add_file_to_result(root_files, target_scan, fd.cFileName, fsize, opts.top_n);
             }
-            dir_names.push_back(fd.cFileName);
-            dir_paths.push_back(join_path(target_scan, fd.cFileName));
         } while (FindNextFileW(h, &fd));
         DWORD err = GetLastError();
         if (err != ERROR_NO_MORE_FILES) total_errors++;
@@ -471,91 +640,98 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     int total_count = (int)dir_paths.size();
-    if (total_count == 0) {
+    if (total_count == 0 && !quiet_stdout) {
         std::cout << "\r" << std::string(12, ' ') << "\r";
-        std::cout << "\n  " << ws2s(target_display) << "  no scannable subfolders\n" << std::endl;
-        if (total_skipped || total_errors) {
-            std::cout << "  skipped " << total_skipped << " folders  |  errors " << total_errors << std::endl;
-        }
-        return 0;
-    }
-
-    // Setup progress
-    ProgressState prog;
-    prog.total = total_count;
-
-    auto t_start = std::chrono::steady_clock::now();
-    int workers = worker_count_for(total_count, opts.workers);
-
-    std::cout << "\r" << std::string(12, ' ') << "\r";
-    if (ansi) {
-        std::cout << "\n  \x1b[1mScanning " << total_count << " folders\x1b[0m in "
-                  << ws2s(target_display) << " with " << workers << " workers ...\n" << std::endl;
-    } else {
-        std::cout << "\n  Scanning " << total_count << " folders in "
-                  << ws2s(target_display) << " with " << workers << " workers ...\n" << std::endl;
     }
 
     // Results storage
     std::vector<ScanResult> results(total_count);
 
-    // Launch worker threads
-    std::atomic<int> next_index(0);
-    std::vector<std::thread> threads;
-    threads.reserve(workers);
+    if (total_count > 0) {
+        // Setup progress
+        ProgressState prog;
+        prog.total = total_count;
 
-    for (int t = 0; t < workers; t++) {
-        threads.emplace_back([&]() {
-            for (;;) {
-                int i = next_index.fetch_add(1);
-                if (i >= total_count) break;
+        int workers = worker_count_for(total_count, opts.workers);
 
-                ScanResult result;
-                try {
-                    result = get_dir_size(dir_paths[i], opts.top_n);
-                } catch (...) {
-                    result.stats.errors++;
+        if (!quiet_stdout) {
+            std::cout << "\r" << std::string(12, ' ') << "\r";
+            if (ansi) {
+                std::cout << "\n  \x1b[1mScanning " << total_count << " folders\x1b[0m in "
+                          << ws2s(target_display) << " with " << workers << " workers ...\n" << std::endl;
+            } else {
+                std::cout << "\n  Scanning " << total_count << " folders in "
+                          << ws2s(target_display) << " with " << workers << " workers ...\n" << std::endl;
+            }
+        }
+
+        // Launch worker threads
+        std::atomic<int> next_index(0);
+        std::vector<std::thread> threads;
+        threads.reserve(workers);
+
+        for (int t = 0; t < workers; t++) {
+            threads.emplace_back([&]() {
+                for (;;) {
+                    int i = next_index.fetch_add(1);
+                    if (i >= total_count) break;
+
+                    ScanResult result;
+                    try {
+                        result = get_dir_size(dir_paths[i], opts.top_n);
+                    } catch (...) {
+                        result.stats.errors++;
+                    }
+                    long long sz = result.stats.size;
+                    results[i] = std::move(result);
+
+                    prog.done_count.fetch_add(1);
+                    prog.bytes_so_far.fetch_add(sz);
                 }
-                long long sz = result.stats.size;
-                results[i] = std::move(result);
+            });
+        }
 
-                prog.done_count.fetch_add(1);
-                prog.bytes_so_far.fetch_add(sz);
+        // Progress animation in main thread (skip in file-output mode for clean output)
+        if (!quiet_stdout) {
+            int tip_start = ansi ? tips_random_start() : -1;
+            auto prog_t0 = std::chrono::steady_clock::now();
+            while (prog.done_count.load() < total_count && !g_interrupted.load()) {
+                long long el = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - prog_t0).count();
+                {
+                    std::lock_guard<std::mutex> lock(prog.mtx);
+                    update_progress(prog, std::cout, ansi, tip_start, el);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-        });
-    }
-
-    // Progress animation in main thread (skip in JSON mode for clean output)
-    if (!opts.json_output) {
-        while (prog.done_count.load() < total_count && !g_interrupted.load()) {
+            // Final progress update
             {
+                long long el = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - prog_t0).count();
                 std::lock_guard<std::mutex> lock(prog.mtx);
-                update_progress(prog, std::cout, ansi);
+                update_progress(prog, std::cout, ansi, tip_start, el);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            // File-output mode: just wait quietly
+            while (prog.done_count.load() < total_count && !g_interrupted.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
-        // Final progress update
-        {
-            std::lock_guard<std::mutex> lock(prog.mtx);
-            update_progress(prog, std::cout, ansi);
-        }
-    } else {
-        // JSON mode: just wait quietly
-        while (prog.done_count.load() < total_count && !g_interrupted.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
 
-    // Wait for all threads
-    for (size_t i = 0; i < threads.size(); i++) {
-        threads[i].join();
-    }
+        // Wait for all threads
+        for (size_t i = 0; i < threads.size(); i++) {
+            threads[i].join();
+        }
 
-    // Clear progress line and any leftover output
-    if (ansi) {
-        std::cout << "\x1b[2K\r" << std::flush;
-    } else {
-        std::cout << "\r" << std::string(100, ' ') << "\r" << std::flush;
+        // Clear progress line and any leftover output
+        if (!quiet_stdout) {
+            if (ansi) {
+                // 清掉进度条行 + 下方的贴士行
+                std::cout << "\x1b[2K\r\n\x1b[2K\r\x1b[1A" << std::flush;
+            } else {
+                std::cout << "\r" << std::string(100, ' ') << "\r" << std::flush;
+            }
+        }
     }
 
     auto t_end = std::chrono::steady_clock::now();
@@ -572,6 +748,10 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     // Aggregate stats
+    total_size += root_files.stats.size;
+    total_files += root_files.stats.files;
+    total_dirs += root_files.stats.dirs;
+
     for (int i = 0; i < total_count; i++) {
         total_size += results[i].stats.size;
         total_files += results[i].stats.files;
@@ -581,8 +761,12 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     // Aggregate file types and top files
-    file_types = aggregate_file_types(results);
-    top_files = merge_top_files(results, opts.top_n);
+    std::vector<ScanResult> aggregate_results;
+    aggregate_results.reserve(results.size() + 1);
+    aggregate_results.push_back(std::move(root_files));
+    aggregate_results.insert(aggregate_results.end(), results.begin(), results.end());
+    file_types = aggregate_file_types(aggregate_results);
+    top_files = merge_top_files(aggregate_results, opts.top_n);
 
     // Aggregate skipped and error directories
     for (int i = 0; i < total_count; i++) {
@@ -623,20 +807,23 @@ int wmain(int argc, wchar_t* argv[]) {
         }
     }
 
-    if (opts.json_output) {
-        // UTF-8 BOM for Windows Notepad compatibility
-        if (!opts.output_file.empty()) {
-            file_stream.write("\xEF\xBB\xBF", 3);
-        }
-        print_json_report(*out, target_display, folders, total_size,
-                          total_files, total_dirs, total_skipped, total_errors,
-                          file_types, top_files, elapsed);
-    } else {
-        print_text_report(*out, target_display, folders, total_size,
-                          total_files, total_dirs, total_skipped, total_errors,
-                          file_types, top_files, elapsed, ansi,
-                          opts.verbose, opts.show_all, all_skipped_dirs, all_error_dirs);
-    }
+    print_text_report(*out, target_display, folders, total_size,
+                      total_files, total_dirs, total_skipped, total_errors,
+                      file_types, top_files, elapsed, ansi,
+                      opts.verbose, opts.show_all, all_skipped_dirs, all_error_dirs);
 
+    {
+        DWORD pids[2];
+        if (GetConsoleProcessList(pids, 2) <= 1) {
+            std::cout << "\nPress [i] for interactive mode, any other key to exit...";
+            int ch = _getch();
+            if (ch == 'i' || ch == 'I') {
+                std::cout << "\n";
+                g_interrupted.store(false);
+                tui_run(target_display, opts.top_n);
+                pause_if_double_clicked();
+            }
+        }
+    }
     return 0;
 }

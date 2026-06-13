@@ -35,12 +35,15 @@ struct TuiState {
     std::thread scan_thread;
     std::atomic<bool> top_files_loading;
     std::thread top_files_thread;
+    int tip_start = 0;                       // 贴士轮换起始下标
+    std::atomic<long long> scan_start_ms;    // 本次扫描开始时刻(ms)，用于贴士轮换计时
 
     TuiState() : selected_index(0), scroll_offset(0),
                  viewport_height(25), viewport_width(80),
                  running(true), top_n(20),
                  sort_by_size(true), show_top_files(false), scanning(false),
-                 scan_active(false), top_files_active(false), top_files_loading(false) {}
+                 scan_active(false), top_files_active(false), top_files_loading(false),
+                 scan_start_ms(0) {}
 
     ~TuiState() {
         running = false;
