@@ -79,14 +79,17 @@ map -i           # Interactive mode (browse like ncdu)
 
 ## Why SpaceMap?
 
-||SpaceMap|WinDirStat|du (GNU)|
-|-|-|-|-|
-|Startup|Instant|Slow (scans first)|Instant|
-|Colors/Charts|Gradient + █ bars|Yes, but GUI|None|
-|Interactive|Yes (TUI)|Yes (GUI)|None|
-|CLI-native|Yes|Needs GUI|Yes|
-|Dependencies|None (single exe)|Requires install|Requires install|
-|Performance|Multi-threaded + MFT direct read, 2-5s/NTFS|Slow|Single-threaded|
+||SpaceMap|WinDirStat|TreeSize Free|du (GNU)|
+|-|-|-|-|-|
+|Price|Free & open-source (MIT)|Free|Free (limited features)|Free|
+|Startup|Instant|Slow (scans first)|Fast-ish|Instant|
+|Colors/Charts|Gradient + █ bars|Yes, but GUI|Yes, but GUI|None|
+|Interactive|Yes (TUI)|Yes (GUI)|Yes (GUI)|None|
+|CLI-native|Yes|Needs GUI|Needs GUI|Yes|
+|Dependencies|None (single exe)|Requires install|Requires install|Requires install|
+|Performance|Multi-threaded + MFT direct read, 2-5s/NTFS|Slow|MFT direct read, fast|Single-threaded|
+|File type stats|✓|✓|✗ (Pro only)|✗|
+|Scripting|✓ (native CLI)|✗|✗|✓|
 
 ## Usage
 
