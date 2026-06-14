@@ -53,25 +53,28 @@ map.exe D:\
   -h help  -i interactive  -t N top files  -a show all folders
 ```
 
-## Quick Start
-
-```bat
-map              # Scan current directory
-map -i           # Interactive mode (browse like ncdu)
-```
-
 ## Installation
 
 **Recommended** (globally accessible):
 
-Copy `map.exe` to `C:\Windows` or any directory in your PATH. Then run `map` from anywhere.
+Download the latest `map.exe` from Releases, then copy it to `C:\Windows` or any directory in your PATH. Run `map` from anywhere.
 
-Or **build from source** (requires g++ 4.9+ / MinGW-w64 / Windows 10+):
+Or build from source (requires g++ 4.9+ / MinGW-w64 / Windows 10+):
 
 ```bat
 git clone https://github.com/usernameisnotavaliablee/spacemap.git
 cd spacemap
 build.bat
+```
+
+## Quick Start
+
+Open the target folder in File Explorer, type `map` in the address bar and press Enter.
+
+Or `cd` to the target directory first:
+```bat
+map              # Scan current directory
+map -i           # Interactive mode (browse like ncdu)
 ```
 
 ## Why SpaceMap?

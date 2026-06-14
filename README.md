@@ -25,25 +25,29 @@ GIF实机演示+食用方法：
 
 </details>
 
-## 快速开始
-
-```bat
-map              # 扫描当前目录
-map -i           # 进入TUI交互模式（像 ncdu 一样浏览）
-```
-
 ## 安装
 
 **推荐方式**（全局可用）：
 
+下载Releases中的最新版`map.exe`之后
 将 `map.exe` 复制到 `C:\Windows` 或其他环境变量的目录，之后在任何路径都能直接执行 `map`。
 
-或选择 **自行编译**（需要 g++ 4.9+ / MinGW-w64 / Windows 10+）：
+或选择自行编译（需要 g++ 4.9+ / MinGW-w64 / Windows 10+）：
 
 ```bat
 git clone https://github.com/usernameisnotavaliablee/spacemap.git
 cd spacemap
 build.bat
+```
+
+## 快速开始
+
+直接在使用文件管理器打开目标文件夹的情况下在地址栏输入`map`后回车即可
+
+或在cd目标目录后：
+```bat
+map              # 扫描当前目录
+map -i           # 进入TUI交互模式（像 ncdu 一样浏览）
 ```
 
 ## 为什么选 SpaceMap？
